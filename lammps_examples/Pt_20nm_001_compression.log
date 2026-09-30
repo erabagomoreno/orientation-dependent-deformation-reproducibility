@@ -1,0 +1,111 @@
+#-------------------COMPRESSION------------------------------------
+
+compute	force all reduce sum fz	# Add the forces of all atoms
+
+variable zmax equal c_3[3]		# store the value for maximum z
+variable zmin equal c_2[3]		#store value for minimum z
+
+thermo_style custom step time temp etotal ke pe press lx ly lz vol c_2[1] c_2[2] c_2[3] c_3[1] c_3[2] c_3[3]
+
+dump NPTmin all xyz 1 ${outdir}/Pt_20nm_shape.0.xyz
+dump NPTmin all xyz 1 /home/erabagomoreno/data/nano_data/20nm_7_strainrate_20_strain_sims_correctwallseperation/Pt_20nm_100_r1/Pt_20nm_shape.0.xyz
+run 0
+WARNING: No fixes defined, atoms won't move (src/verlet.cpp:55)
+Per MPI rank memory allocation (min/avg/max) = 4.726 | 7.417 | 10.88 Mbytes
+Step Time Temp TotEng KinEng PotEng Press Lx Ly Lz Volume c_2[1] c_2[2] c_2[3] c_3[1] c_3[2] c_3[3] 
+  300000            0    300.80658   -1615316.1    11164.586   -1626480.7   -48.654483    301.18822    301.24501    241.10067     21875413   -100.36564   -100.42314   -100.39017    100.42651    100.40686    100.33688 
+Loop time of 4.70477e-06 on 56 procs for 0 steps with 287139 atoms
+
+108.2% CPU use with 56 MPI tasks x 1 OpenMP threads
+
+MPI task timing breakdown:
+Section |  min time  |  avg time  |  max time  |%varavg| %total
+---------------------------------------------------------------
+Pair    | 0          | 0          | 0          |   0.0 |  0.00
+Neigh   | 0          | 0          | 0          |   0.0 |  0.00
+Comm    | 0          | 0          | 0          |   0.0 |  0.00
+Output  | 0          | 0          | 0          |   0.0 |  0.00
+Modify  | 0          | 0          | 0          |   0.0 |  0.00
+Other   |            | 4.705e-06  |            |       |100.00
+
+Nlocal:        5127.48 ave       11616 max         371 min
+Histogram: 10 6 8 0 8 0 16 4 0 4
+Nghost:        6117.00 ave       10301 max        1245 min
+Histogram: 8 8 0 8 0 0 8 8 8 8
+Neighs:        351297.0 ave      806012 max       18473 min
+Histogram: 12 4 8 0 8 0 16 4 0 4
+
+Total # of neighbors = 19672612
+Ave neighs/atom = 68.512504
+Neighbor list builds = 0
+Dangerous builds not checked
+undump NPTmin
+
+# Per atom energy.
+compute        peratom all pe/atom
+compute		CSP all centro/atom fcc
+
+# Per atom stress. [(stress) per (atom) per (unit of volume)] = [bar/atom/A3]
+compute strAS1 all stress/atom NULL virial
+# Per region stress. [Stress per (unit of volume)] = [bar/A3].
+compute strAS2 all reduce sum c_strAS1[1] c_strAS1[2] c_strAS1[3] c_strAS1[4] c_strAS1[5] c_strAS1[6]
+
+# Stress tensor [GPa].
+variable Sxx equal (c_strAS2[1])
+variable Syy equal (c_strAS2[2])
+variable Szz equal (c_strAS2[3])
+variable Sxy equal (c_strAS2[4])
+variable Sxz equal (c_strAS2[5])
+variable Syz equal (c_strAS2[6])
+
+variable  hydro atom (c_strAS1[1]+c_strAS1[2]+c_strAS1[3])/3
+variable S11 atom (c_strAS1[1]-v_hydro)
+variable S22 atom (c_strAS1[2]-v_hydro)
+variable S33 atom (c_strAS1[3]-v_hydro)
+
+variable  vonmises2 atom (c_strAS1[1]-c_strAS1[2])^2+(c_strAS1[2]-c_strAS1[3])^2+(c_strAS1[1]-c_strAS1[3])^2+6*(c_strAS1[4]^2+c_strAS1[5]^2+c_strAS1[6]^2)
+
+variable Xl equal (${zmax}-${zmin})
+variable Xl equal (100.336876086493-${zmin})
+variable Xl equal (100.336876086493--100.390169719848)
+variable reducedsize equal ${Xl}*0.10           # maximum stress *2 two walls are been used
+variable reducedsize equal 200.727045806341*0.10           
+
+variable stn equal (-1*(c_3[3]-c_2[3]-${Xl})/${Xl})
+variable stn equal (-1*(c_3[3]-c_2[3]-200.727045806341)/${Xl})
+variable stn equal (-1*(c_3[3]-c_2[3]-200.727045806341)/200.727045806341)
+
+variable intop equal (${zmax}+2.0)
+variable intop equal (100.336876086493+2.0)
+variable fintop equal (${zmax}-${reducedsize}+2.00)
+variable fintop equal (100.336876086493-${reducedsize}+2.00)
+variable fintop equal (100.336876086493-20.0727045806341+2.00)
+variable inbot equal (${zmin}-2.0)
+variable inbot equal (-100.390169719848-2.0)
+variable finbot equal (${zmin}+${reducedsize}-2.00)
+variable finbot equal (-100.390169719848+${reducedsize}-2.00)
+variable finbot equal (-100.390169719848+20.0727045806341-2.00)
+
+#----------------LOADING------------------------------------
+
+fix 9 all langevin ${t} ${t} $(1000.0*dt) 84829
+fix 9 all langevin 300 ${t} $(1000.0*dt) 84829
+fix 9 all langevin 300 300 $(1000.0*dt) 84829
+fix 9 all langevin 300 300 1 84829
+fix		1 all nve
+
+variable ramptop equal ramp(v_intop,v_fintop)
+variable rampbot equal ramp(v_inbot,v_finbot)
+
+fix indentertop all wall/harmonic zhi v_ramptop 500.0 1.0 1.8 units box
+fix indenterbot all wall/harmonic zlo v_rampbot 500.0 1.0 1.8 units box
+fix printforce all ave/time 5 200 5000 f_indentertop[1] f_indenterbot[1]
+fix Sxxave all ave/time 5 200 5000 v_Sxx
+fix Syyave all ave/time 5 200 5000 v_Syy
+fix Szzave all ave/time 5 200 5000 v_Szz
+fix Sxyave all ave/time 5 200 5000 v_Sxy
+fix Sxzave all ave/time 5 200 5000 v_Sxz
+fix Syzave all ave/time 5 200 5000 v_Syz
+
+log	${outdir}/log.Pt_shape
+log	/home/erabagomoreno/data/nano_data/20nm_7_strainrate_20_strain_sims_correctwallseperation/Pt_20nm_100_r1/log.Pt_shape
